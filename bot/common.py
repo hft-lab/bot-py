@@ -1,6 +1,10 @@
 import json
+import string
+import random
 
-procData = {}
+
+def id_generator(size=12, chars=string.ascii_uppercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
 
 
 def creating_procData(client, public_client, bot_TIMEX):
@@ -72,5 +76,4 @@ def creating_procData(client, public_client, bot_TIMEX):
     return procData
 
 
-def init():
-    procData = creating_procData()
+procData = creating_procData()
