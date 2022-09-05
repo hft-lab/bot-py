@@ -1,7 +1,13 @@
 INSTALL
 =======
 
-Installation is a bit tricky due to conflicting versions of setuptools. TBD
+```shell
+git clone git@github.com:hft-lab/dydx-v3-python.git
+git clone git@github.com:hft-lab/bot-py.git
+python3 -m virtualenv venv
+./venv/bin/pip install -e dydx-v3-python
+./venv/bin/pip install -e bot-py
+```
 
 CONFIG
 ======
@@ -28,4 +34,11 @@ emergency_bot_token = ...
 first_chat_id = ...
 second_chat_id = ...
 third_chat_id = ...
+```
+
+RUN
+===
+
+```sh
+./venv/bin/bot --config config.ini
 ```
