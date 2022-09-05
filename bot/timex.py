@@ -3,10 +3,11 @@ import time
 import datetime
 import websockets
 import json
-from .common import id_generator
+import asyncio
+from .common import id_generator, procData
 from .telegram import telegram
 
-uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
+URI_WS = 'wss://plasma-relay-backend.timex.io/socket/relay'
 
 with open('/home/ubuntu/timex_keys.txt', 'r', encoding='UTF-8') as db:
     m = db.read().split('\n')
@@ -177,7 +178,7 @@ def hist_orders_check(res, order_id):
 
 
 async def fetch_ws_order(order_id):
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         msg = fetch_open_orders()
         await websocket.send(json.dumps(msg))
         res = await websocket.recv()
@@ -201,7 +202,7 @@ async def fetch_ws_order(order_id):
 
 
 async def cancel_ws_order(order_id):
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         msg = msg_for_cancel(order_id)
         await websocket.send(json.dumps(msg))
         res = await websocket.recv()
@@ -210,7 +211,7 @@ async def cancel_ws_order(order_id):
 
 
 async def update_ws_order(data):
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         msg = update_order(data)
         await websocket.send(json.dumps(msg))
         res = await websocket.recv()
@@ -219,7 +220,7 @@ async def update_ws_order(data):
 
 
 async def create_ws_order(data):
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         msg = msg_for_create_order(data)
         await websocket.send(json.dumps(msg))
         res = await websocket.recv()
@@ -228,7 +229,7 @@ async def create_ws_order(data):
 
 
 async def fetchOpenOrders():
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         msg = fetch_open_orders()
         await websocket.send(json.dumps(msg))
         res = await websocket.recv()
@@ -304,8 +305,7 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
             "limit": 20
         }
     }
-    uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         while True:
             orderbook = {'bids':[], 'asks': [], 'timestamp': 0}
             await websocket.send(json.dumps(msg))
@@ -321,3 +321,49 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
                 buffer_rates_TIMEX[:15000] = bytearray([0 for x in range(15000)])
             buffer_rates_TIMEX[:len(encoded_data)] = encoded_data
             last_len = len(encoded_data)
+
+
+async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
+    pair_TIMEX = ''.join(procData['pair_TIMEX'].split('/'))
+    last_len = 400
+    flag = True
+    async with websockets.connect(URI_WS) as websocket:
+        while True:
+            msg = get_trades()
+            await websocket.send(json.dumps(msg))
+            res_trades = await websocket.recv()
+            res_trades = json.loads(res_trades)
+            if flag:
+                last_trade = res_trades['responseBody']['trades'][0]
+                encoded_data = json.dumps(last_trade).encode('utf-8')
+                buffer_trades_TIMEX[:len(encoded_data)] = encoded_data
+                flag = False
+            for trade in res_trades['responseBody']['trades']:
+                if trade == last_trade:
+                    break
+                if trade['symbol'] == pair_TIMEX:
+                    price = float(trade['price'])
+                    side = trade['side']
+                    amount = float(trade['quantity'])
+                    fee_amount = float(trade['fee'])
+                    order_type = trade['makerOrTaker']
+                    fee_coin = trade['feeToken']
+                    await execute_order(procData, order_type, amount, price, side, fee_amount, fee_coin)
+                    encoded_data = json.dumps(last_trade).encode('utf-8')
+                    if len(encoded_data) < last_len:
+                        buffer_trades_TIMEX[:400] = bytearray([0 for x in range(400)])
+                    buffer_trades_TIMEX[:len(encoded_data)] = encoded_data
+                    last_len = len(encoded_data)
+            last_trade = res_trades['responseBody']['trades'][0]
+
+
+def start_proc_hack_TIMEX(procData, buffer_rates_TIMEX):
+    name = f'WS_orderbook_TIMEX_{procData["coin"]}'
+    while True:
+        try:
+            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_data(procData, buffer_rates_TIMEX))
+        except Exception as e:
+            try:
+                telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
+            except:
+                pass

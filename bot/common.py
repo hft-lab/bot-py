@@ -7,8 +7,8 @@ def id_generator(size=12, chars=string.ascii_uppercase + string.digits):
     return ''.join(random.choice(chars) for _ in range(size))
 
 
-def creating_procData(client, public_client, bot_TIMEX):
-    user = client.private.get_user().data
+def creating_procData(dydx, bot_TIMEX):
+    user = dydx.client.private.get_user().data
     pair_DYDX = 'ETH-USD'
     pair_TIMEX = 'ETH/AUDT'
     coin = 'ETH'
@@ -17,7 +17,7 @@ def creating_procData(client, public_client, bot_TIMEX):
     markets_TIMEX = None
     while not markets_DYDX or not markets_TIMEX:
         try:
-            markets_DYDX = public_client.public.get_markets()
+            markets_DYDX = dydx.public_client.public.get_markets()
             markets_TIMEX = bot_TIMEX.load_markets()
         except:
             pass
