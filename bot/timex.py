@@ -4,15 +4,16 @@ import datetime
 import websockets
 import json
 from .common import id_generator
+from .telegram import telegram
 
 uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
 
 with open('/home/ubuntu/timex_keys.txt', 'r', encoding='UTF-8') as db:
     m = db.read().split('\n')
-api_key = m[1].split("'")[1]
-api_secret = m[0].split("'")[1]
+_api_key = m[1].split("'")[1]
+_api_secret = m[0].split("'")[1]
 
-bot_TIMEX = ccxt.timex({'apiKey': api_key, 'secret': api_secret,
+bot_TIMEX = ccxt.timex({'apiKey': _api_key, 'secret': _api_secret,
                         'enableRateLimit': True})
 
 bot_TIMEX_public = ccxt.timex({'enableRateLimit': True})
@@ -28,8 +29,8 @@ def msg_for_create_order(data):
         "requestId": id_generator(size=6),
         "stream": "/post/trading/orders/json",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "body": [
@@ -57,8 +58,8 @@ def update_order(data):
         "requestId": id_generator(size=6),
         "stream": "/put/trading/orders/json",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "body": [
@@ -80,8 +81,8 @@ def msg_for_cancel(order_id):
         "requestId": id_generator(size=6),
         "stream": "/delete/trading/orders/json",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "body": [
@@ -100,8 +101,8 @@ def fetch_historical_orders(amount=10):
         "requestId": id_generator(size=6),
         "stream": "/get/history/orders",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "pageable": {
@@ -119,8 +120,8 @@ def get_trades():
         "requestId": id_generator(size=6),
         "stream": "/get/history/trades",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "pageable": {
@@ -138,8 +139,8 @@ def fetch_open_orders():
         "requestId": id_generator(size=6),
         "stream": "/get/trading/orders",
         "auth": {
-            "id": api_key,
-            "secret": api_secret
+            "id": _api_key,
+            "secret": _api_secret
         },
         "payload": {
             "pageable": {
@@ -233,3 +234,90 @@ async def fetchOpenOrders():
         res = await websocket.recv()
         res = json.loads(res)
         return res
+
+async def fetch_change_price(pair):
+    msg = {
+        "type": "REST",
+        "requestId": 'uniqueID',
+        "stream": "/get/public/orderbook/raw",
+        "auth": {
+            "id": _api_key,
+            "secret": _api_secret
+        },
+        "payload": {
+            "market": pair,
+            "limit": 20
+        }
+    }
+    uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
+    async with websockets.connect(uri_ws) as websocket:
+        try:
+            orderbook = {'bids':[], 'asks': [], 'timestamp': 0}
+            await websocket.send(json.dumps(msg))
+            res = await websocket.recv()
+            res = json.loads(res)
+            for bid in res['responseBody']['bid']:
+                orderbook['bids'].append([float(bid['price']), float(bid['quantity'])])
+            for ask in res['responseBody']['ask']:
+                orderbook['asks'].append([float(ask['price']), float(ask['quantity'])])
+            if len(orderbook['bids']) and len(orderbook['asks']):
+                if 'AUDT' in pair:
+                    change = 1 / ((orderbook['bids'][0][0] + orderbook['asks'][0][0]) / 2)
+                else:
+                    change = ((orderbook['bids'][0][0] + orderbook['asks'][0][0]) / 2)
+            elif len(orderbook['bids']) and not len(orderbook['asks']):
+                if 'AUDT' in pair:
+                    change = 1 / (orderbook['bids'][0][0])
+                else:
+                    change = orderbook['bids'][0][0]
+            elif not len(orderbook['bids']) and len(orderbook['asks']):
+                if 'AUDT' in pair:
+                    change = 1 / (orderbook['asks'][0][0])
+                else:
+                    change = orderbook['asks'][0][0]
+            elif not len(orderbook['bids']) and not len(orderbook['asks']):
+                return await fetch_change_price(pair)
+        except Exception as e:
+            try:
+                telegram.send_first_chat(f"Error: {e}\nOrderbook: {orderbook}")
+            except:
+                telegram.send_emergency(f"Error: {e}\nOrderbook: {orderbook}")
+            return None
+        return change
+
+
+async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
+    i = 0
+    last_len = 15000
+    last_data = {'asks': None, 'bids': None}
+    pair_TIMEX = procData['pair_TIMEX'].split('/')[0] + procData['pair_TIMEX'].split('/')[1]
+    msg = {
+        "type": "REST",
+        "requestId": 'uniqueID',
+        "stream": "/get/public/orderbook/raw",
+        "auth": {
+            "id": _api_key,
+            "secret": _api_secret
+        },
+        "payload": {
+            "market": pair_TIMEX,
+            "limit": 20
+        }
+    }
+    uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
+    async with websockets.connect(uri_ws) as websocket:
+        while True:
+            orderbook = {'bids':[], 'asks': [], 'timestamp': 0}
+            await websocket.send(json.dumps(msg))
+            res = await websocket.recv()
+            res = json.loads(res)
+            for bid in res['responseBody']['bid']:
+                orderbook['bids'].append([float(bid['price']), float(bid['quantity'])])
+            for ask in res['responseBody']['ask']:
+                orderbook['asks'].append([float(ask['price']), float(ask['quantity'])])
+            orderbook['timestamp'] = res['responseBody']['timestamp']
+            encoded_data = json.dumps(orderbook).encode('utf-8')
+            if len(encoded_data) < last_len:
+                buffer_rates_TIMEX[:15000] = bytearray([0 for x in range(15000)])
+            buffer_rates_TIMEX[:len(encoded_data)] = encoded_data
+            last_len = len(encoded_data)
