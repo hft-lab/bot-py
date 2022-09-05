@@ -4,7 +4,6 @@ from dydx3.constants import NETWORK_ID_MAINNET
 import json
 import time
 from web3 import Web3
-from .common import procData
 
 
 with open("dydx_keys.json", "r") as file:
