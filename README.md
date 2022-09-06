@@ -36,7 +36,7 @@ second_chat_id = ...
 third_chat_id = ...
 
 [DB]
-db_path = /home/ubuntu/new_orders_ETH.db
+db_path = ~work/hft/new_orders_ETH.sqlite
 ```
 
 RUN
