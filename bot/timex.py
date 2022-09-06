@@ -4,7 +4,7 @@ import datetime
 import websockets
 import json
 import asyncio
-from .common import id_generator, procData
+from .common import id_generator, PROC_DATA
 from .telegram import telegram
 
 URI_WS = 'wss://plasma-relay-backend.timex.io/socket/relay'
@@ -324,7 +324,7 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
 
 
 async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
-    pair_TIMEX = ''.join(procData['pair_TIMEX'].split('/'))
+    pair_TIMEX = ''.join(PROC_DATA['pair_TIMEX'].split('/'))
     last_len = 400
     flag = True
     async with websockets.connect(URI_WS) as websocket:
@@ -348,7 +348,7 @@ async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
                     fee_amount = float(trade['fee'])
                     order_type = trade['makerOrTaker']
                     fee_coin = trade['feeToken']
-                    await execute_order(procData, order_type, amount, price, side, fee_amount, fee_coin)
+                    await execute_order(PROC_DATA, order_type, amount, price, side, fee_amount, fee_coin)
                     encoded_data = json.dumps(last_trade).encode('utf-8')
                     if len(encoded_data) < last_len:
                         buffer_trades_TIMEX[:400] = bytearray([0 for x in range(400)])

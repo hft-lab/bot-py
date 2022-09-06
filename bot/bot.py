@@ -1395,26 +1395,25 @@ sh_trades_TIMEX_maker_sell = shared_memory.SharedMemory(shm_trades_TIMEX.name)
 
 
 def main():
-    common.creating_procData(dydx, bot_TIMEX)
-    common.procData['sh_rates_DYDX'] = sh_rates_DYDX_check
+    common.PROC_DATA['sh_rates_DYDX'] = sh_rates_DYDX_check
     db.sql_create_table()
     procs = []
-    proc = Process(target=start_proc_hack_TIMEX, args=(common.procData, buffer_rates_TIMEX, )) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_TIMEX, args=(common.PROC_DATA, buffer_rates_TIMEX,)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_api_DYDX, args=(common.procData, buffer_rates_DYDX, )) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_api_DYDX, args=(common.PROC_DATA, buffer_rates_DYDX,)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_ws_DYDX, args=(common.procData, buffer_rates_DYDX, sh_rates_DYDX_ws)) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_ws_DYDX, args=(common.PROC_DATA, buffer_rates_DYDX, sh_rates_DYDX_ws)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_trades_TIMEX, args=(common.procData, buffer_trades_TIMEX, sh_rates_DYDX_check, )) #FTX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_trades_TIMEX, args=(common.PROC_DATA, buffer_trades_TIMEX, sh_rates_DYDX_check,)) #FTX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=find_arbitrage, args=(common.procData, sh_rates_DYDX_maker_sell, sh_rates_TIMEX_maker_sell, sh_trades_TIMEX_maker_sell, False, False, False, 'maker_sell'))
+    proc = Process(target=find_arbitrage, args=(common.PROC_DATA, sh_rates_DYDX_maker_sell, sh_rates_TIMEX_maker_sell, sh_trades_TIMEX_maker_sell, False, False, False, 'maker_sell'))
     procs.append(proc) #SNX-USD SELL MAKERS PROCS LAUNCH
 
-    proc = Process(target=find_arbitrage, args=(common.procData, sh_rates_DYDX_maker_buy, sh_rates_TIMEX_maker_buy, sh_trades_TIMEX_maker_buy, True, False, False, 'maker_buy'))
+    proc = Process(target=find_arbitrage, args=(common.PROC_DATA, sh_rates_DYDX_maker_buy, sh_rates_TIMEX_maker_buy, sh_trades_TIMEX_maker_buy, True, False, False, 'maker_buy'))
     procs.append(proc)  # SNX-USD BUY MAKERS PROCS LAUNCH
 
     for proc in procs:
@@ -1424,4 +1423,4 @@ def main():
     time.sleep(1)
 
     #LAUNCH MAIN PROC TAKER SNX/USDN
-    find_arbitrage(common.procData, sh_rates_DYDX_taker, sh_rates_TIMEX_taker, None, buy_proc=True, report_sender=True, takers_only=True, proc_name='taker')
+    find_arbitrage(common.PROC_DATA, sh_rates_DYDX_taker, sh_rates_TIMEX_taker, None, buy_proc=True, report_sender=True, takers_only=True, proc_name='taker')

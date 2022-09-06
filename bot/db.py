@@ -1,12 +1,13 @@
 import sqlite3
 from . import common
 from .telegram import telegram
+from .config import config
 
 
 class DB:
     def __init__(self):
         self.sql_create_table()
-        self.connect = sqlite3.connect(f'/home/ubuntu/new_orders_{common.procData["coin"]}.db')
+        self.connect = sqlite3.connect(config["DB"]["db_path"])
 
     def sql_create_table(self):
         cursor = self.connect.cursor()
@@ -34,7 +35,7 @@ class DB:
         cursor.close()
 
     def sql_add_new_order_buy(self, to_base):
-        coin = common.procData["coin"]
+        coin = common.PROC_DATA["coin"]
         cursor = self.connect.cursor()
         last = cursor.execute("SELECT * FROM orders_res;").fetchall()
         if len(last):
@@ -82,33 +83,33 @@ class DB:
         cursor.close()
 
     def disbalanses_append(self, dis_amount):
-        orderbook_TIMEX = common.procData['orderbook_TIMEX']
-        ticksize_TIMEX = common.procData['ticksize_TIMEX']
-        changes = common.procData['changes']
-        coin = common.procData['coin']
+        orderbook_TIMEX = common.PROC_DATA['orderbook_TIMEX']
+        ticksize_TIMEX = common.PROC_DATA['ticksize_TIMEX']
+        changes = common.PROC_DATA['changes']
+        coin = common.PROC_DATA['coin']
         cursor = self.connect.cursor()
         last = cursor.execute("SELECT * FROM orders_res;").fetchall()
         cursor.close()
         if len(last) > 10:
             if last[-1][1] == 'TIMEX':
-                if common.procData['price_coin'] == 'AUDT':
+                if common.PROC_DATA['price_coin'] == 'AUDT':
                     timex_price = (orderbook_TIMEX['asks'][0][0] - ticksize_TIMEX) * changes['AUDT']
                 else:
                     timex_price = (orderbook_TIMEX['asks'][0][0] - ticksize_TIMEX)
                 price_diff = timex_price - last[-1][2]
             else:
-                if common.procData['price_coin'] == 'AUDT':
+                if common.PROC_DATA['price_coin'] == 'AUDT':
                     timex_price = (orderbook_TIMEX['bids'][0][0] + ticksize_TIMEX) * changes['AUDT']
                 else:
                     timex_price = (orderbook_TIMEX['bids'][0][0] + ticksize_TIMEX)
                 price_diff = last[-1][4] - timex_price
         else:
             price_diff = 0
-        common.procData['disbalanses'].append([abs(dis_amount), price_diff])
+        common.PROC_DATA['disbalanses'].append([abs(dis_amount), price_diff])
         message = f"Disbalanse found:\n"
         message += f"Amount, {coin}: {round(abs(dis_amount), 2)}\n"
         message += f"Disbalanse loss, USD: {round(abs(dis_amount) * price_diff, 2)}\n"
-        message += f"Process: {common.procData['proc_name']}"
+        message += f"Process: {common.PROC_DATA['proc_name']}"
         try:
             telegram.send_first_chat(message)
         except:

@@ -1,13 +1,15 @@
 import json
 import string
 import random
+from . import dydx
+from .timex import bot_TIMEX
 
 
 def id_generator(size=12, chars=string.ascii_uppercase + string.digits):
     return ''.join(random.choice(chars) for _ in range(size))
 
 
-def creating_procData(dydx, bot_TIMEX):
+def create_proc_data():
     user = dydx.client.private.get_user().data
     pair_DYDX = 'ETH-USD'
     pair_TIMEX = 'ETH/AUDT'
@@ -76,4 +78,4 @@ def creating_procData(dydx, bot_TIMEX):
     return procData
 
 
-procData = creating_procData()
+PROC_DATA = create_proc_data()
