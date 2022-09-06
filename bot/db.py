@@ -1,7 +1,7 @@
+from .config import config
 import sqlite3
 from . import common
 from .telegram import telegram
-from .config import config
 
 
 class DB:
