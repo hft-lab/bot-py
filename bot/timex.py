@@ -4,20 +4,27 @@ import datetime
 import websockets
 import json
 import asyncio
-from .common import id_generator, PROC_DATA
+import string
+import random
+
 from .telegram import telegram
+from .config import config
 
 URI_WS = 'wss://plasma-relay-backend.timex.io/socket/relay'
 
-with open('/home/ubuntu/timex_keys.txt', 'r', encoding='UTF-8') as db:
-    m = db.read().split('\n')
-_api_key = m[1].split("'")[1]
-_api_secret = m[0].split("'")[1]
+_api_key = config["TIMEX"]["api_key"]
+_api_secret = config["TIMEX"]["api_secret"]
 
-bot_TIMEX = ccxt.timex({'apiKey': _api_key, 'secret': _api_secret,
-                        'enableRateLimit': True})
+bot_TIMEX = ccxt.timex({
+    'apiKey': _api_key,
+    'secret': _api_secret,
+    'enableRateLimit': True})
 
 bot_TIMEX_public = ccxt.timex({'enableRateLimit': True})
+
+
+def id_generator(size=12, chars=string.ascii_uppercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
 
 
 def msg_for_create_order(data):
@@ -250,8 +257,7 @@ async def fetch_change_price(pair):
             "limit": 20
         }
     }
-    uri_ws = 'wss://plasma-relay-backend.timex.io/socket/relay'
-    async with websockets.connect(uri_ws) as websocket:
+    async with websockets.connect(URI_WS) as websocket:
         try:
             orderbook = {'bids':[], 'asks': [], 'timestamp': 0}
             await websocket.send(json.dumps(msg))
@@ -323,8 +329,8 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
             last_len = len(encoded_data)
 
 
-async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
-    pair_TIMEX = ''.join(PROC_DATA['pair_TIMEX'].split('/'))
+async def fetch_TIMEX_trades(proc_data, execute_order, buffer_trades_TIMEX):
+    pair_TIMEX = ''.join(proc_data['pair_TIMEX'].split('/'))
     last_len = 400
     flag = True
     async with websockets.connect(URI_WS) as websocket:
@@ -348,7 +354,7 @@ async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
                     fee_amount = float(trade['fee'])
                     order_type = trade['makerOrTaker']
                     fee_coin = trade['feeToken']
-                    await execute_order(PROC_DATA, order_type, amount, price, side, fee_amount, fee_coin)
+                    await execute_order(proc_data, order_type, amount, price, side, fee_amount, fee_coin)
                     encoded_data = json.dumps(last_trade).encode('utf-8')
                     if len(encoded_data) < last_len:
                         buffer_trades_TIMEX[:400] = bytearray([0 for x in range(400)])
@@ -357,11 +363,11 @@ async def fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX):
             last_trade = res_trades['responseBody']['trades'][0]
 
 
-def start_proc_hack_TIMEX(procData, buffer_rates_TIMEX):
-    name = f'WS_orderbook_TIMEX_{procData["coin"]}'
+def start_proc_hack_TIMEX(proc_data, buffer_rates_TIMEX):
+    name = f'WS_orderbook_TIMEX_{proc_data["coin"]}'
     while True:
         try:
-            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_data(procData, buffer_rates_TIMEX))
+            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_data(proc_data, buffer_rates_TIMEX))
         except Exception as e:
             try:
                 telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
