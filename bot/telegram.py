@@ -26,9 +26,10 @@ class Telegram:
         return self.bot.send_document(doc)
 
 
-telegram = Telegram(config["bot_token"],
-                    config["emergency_token"],
-                    config["chat_id"],
-                    config["second_chat_id"],
-                    config["third_chat_id"],
+conf = config["TELEGRAM"]
+telegram = Telegram(conf["bot_token"],
+                    conf["emergency_bot_token"],
+                    int(conf["first_chat_id"]),
+                    int(conf["second_chat_id"]),
+                    int(conf["third_chat_id"]),
                     )

@@ -2,12 +2,12 @@ from .config import config
 import sqlite3
 from . import common
 from .telegram import telegram
-
+from os.path import expanduser
 
 class DB:
     def __init__(self):
+        self.connect = sqlite3.connect(expanduser(config["DB"]["db_path"]))
         self.sql_create_table()
-        self.connect = sqlite3.connect(config["DB"]["db_path"])
 
     def sql_create_table(self):
         cursor = self.connect.cursor()
@@ -121,3 +121,6 @@ class DB:
         last = cursor.execute("SELECT * FROM orders_res;").fetchall()
         cursor.close()
         return last
+
+
+db = DB()

@@ -7,8 +7,13 @@ import asyncio
 import string
 import random
 
+from . import shm
+from .db import db
 from .telegram import telegram
 from .config import config
+from .ftx import fetch_AUD_price
+
+offset = datetime.timedelta(hours=3)
 
 URI_WS = 'wss://plasma-relay-backend.timex.io/socket/relay'
 
@@ -313,7 +318,7 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
     }
     async with websockets.connect(URI_WS) as websocket:
         while True:
-            orderbook = {'bids':[], 'asks': [], 'timestamp': 0}
+            orderbook = {'bids': [], 'asks': [], 'timestamp': 0}
             await websocket.send(json.dumps(msg))
             res = await websocket.recv()
             res = json.loads(res)
@@ -329,7 +334,7 @@ async def fetch_TIMEX_data(procData, buffer_rates_TIMEX):
             last_len = len(encoded_data)
 
 
-async def fetch_TIMEX_trades(proc_data, execute_order, buffer_trades_TIMEX):
+async def fetch_TIMEX_trades(proc_data, buffer_trades_TIMEX):
     pair_TIMEX = ''.join(proc_data['pair_TIMEX'].split('/'))
     last_len = 400
     flag = True
@@ -363,6 +368,118 @@ async def fetch_TIMEX_trades(proc_data, execute_order, buffer_trades_TIMEX):
             last_trade = res_trades['responseBody']['trades'][0]
 
 
+async def total_balance(proc_data):
+    from . import dydx
+    # try:
+    start_summ = 0
+    summ = 0
+    cashin_cashout = 0
+    main_coin = proc_data['coin']
+    price_coin = proc_data['price_coin']
+    changes = proc_data['changes']
+    change_TIME = await fetch_change_price('TIMEUSDT')
+    changes.update({'TIME': round(change_TIME, 2)})
+    proc_data = dydx.coins_amounts_calc(proc_data)
+    start_balance = proc_data['start_balance']
+    coins_amounts = proc_data['coins_amounts']
+    for coin, amount in start_balance['balances'].items():
+        start_summ += amount * changes[coin]
+    position_profit = start_balance['positions'][main_coin]['position'] * (changes[main_coin] - start_balance['positions'][main_coin]['price'])
+    summ += coins_amounts['DYDX']['USDC']['total']
+    summ += coins_amounts['TIMEX'][price_coin]['total'] * changes[price_coin]
+    summ += coins_amounts['TIMEX'][main_coin]['total'] * changes[main_coin]
+    total_balance_real = round(summ, 2)
+    total_profit = round(summ - start_summ - position_profit, 2)
+    # if abs(total_profit) / total_balance_real * 100 > 3:
+    #     start_balance = start_balance_rewrite(coins_amounts, changes)
+    #     cashin_cashout = total_profit
+    DYDX_USD = coins_amounts['DYDX']['USDC']['total']
+    TIMEX_USD = coins_amounts['TIMEX'][price_coin]['total'] * changes[price_coin] + coins_amounts['TIMEX'][main_coin]['total'] * changes[main_coin]
+    return total_balance_real, total_profit, DYDX_USD, TIMEX_USD, cashin_cashout
+
+
+async def execute_order(proc_data, order_type, amount, price, side, fee_amount, fee_coin):
+    ticksize_DYDX = proc_data['ticksize_DYDX']
+    DYDX_fee = proc_data['DYDX_fee']
+    if order_type == 'MAKER':
+        TIMEX_fee = proc_data['TIMEX_fee']
+    else:
+        TIMEX_fee = proc_data['TIMEX_taker_fee']
+    TIMEX_taker_fee = proc_data['TIMEX_taker_fee']
+    pair_DYDX = proc_data['pair_DYDX']
+    coin = proc_data['coin']
+    if proc_data['price_coin'] == 'AUDT':
+        price_AUDT = price
+        change_AUDT = fetch_AUD_price()
+        price *= change_AUDT
+    sh_rates_DYDX = proc_data['sh_rates_DYDX']
+    orderbook_DYDX = shm.fetch_shared_memory(proc_data['sh_rates_DYDX'], 'DEAL')
+    if side == 'BUY':
+        sell_dydx_price = orderbook_DYDX['bids'][0][0] + ticksize_DYDX
+        profit = (sell_dydx_price - price) / price - (TIMEX_fee + DYDX_fee)
+    else:
+        buy_dydx_price = orderbook_DYDX['asks'][0][0] - ticksize_DYDX
+        profit = (price - buy_dydx_price) / buy_dydx_price - (DYDX_fee + TIMEX_fee)
+
+    changes = {coin: (orderbook_DYDX['asks'][0][0] + orderbook_DYDX['bids'][0][0]) / 2, 'USDC': 1, 'USDT': 1}
+    USD_amount = amount * changes[coin]
+    if fee_coin == 'AUDT':
+        fee_amount = fee_amount * change_AUDT
+        changes.update({'AUDT': change_AUDT})
+    TG_message = f"{order_type} ORDER EXECUTED\n"
+    TG_message += f"Profit: {round(profit * 100, 3)}% ({round(USD_amount * profit, 2)} USD)\n"
+    if side == 'BUY':
+        buy_stock = 'TIMEX'
+        sell_stock = 'DYDX'
+        buy_price = price
+        sell_price = sell_dydx_price
+        TG_message += f"Buy stock: {buy_stock}\n"
+        TG_message += f"Buy price: {price}\n"
+        if proc_data['price_coin'] == 'AUDT':
+            TG_message += f"Buy price, AUDT: {price_AUDT}\n"
+        TG_message += f"Sell stock: {sell_stock}\n"
+        TG_message += f"Sell price: {sell_price}\n"
+    else:
+        buy_stock = 'DYDX'
+        sell_stock = 'TIMEX'
+        sell_price = price
+        buy_price = buy_dydx_price
+        TG_message += f"Buy stock: {buy_stock}\n"
+        TG_message += f"Buy price: {buy_price}\n"
+        TG_message += f"Sell stock: {sell_stock}\n"
+        TG_message += f"Sell price: {sell_price}\n"
+        if proc_data['price_coin'] == 'AUDT':
+            TG_message += f"Sell price, AUDT: {price_AUDT}\n"
+    TG_message += f"Deal amount:\n{amount} {coin}\n"
+    TG_message += f"({USD_amount} USD)\n"
+    TG_message += f"Fee: {fee_amount} USD\n"
+    if proc_data['price_coin'] == 'AUDT':
+        TG_message += f"Change price AUDT/USDT: {changes['AUDT']}\n"
+    try:
+        telegram.send_first_chat('<pre>' + TG_message + '</pre>', parse_mode='HTML')
+    except:
+        pass
+    proc_data['changes'] = changes
+    total_balance_real, total_profit, DYDX_USD, TIMEX_USD, cashin_cashout = await total_balance(proc_data)
+    to_base = {'TIMEX_USD': TIMEX_USD,
+               'DYDX_USD': DYDX_USD,
+               'buy_exchange': buy_stock,
+               'buy_price': buy_price,
+               'sell_exchange': sell_stock,
+               'sell_price': sell_price,
+               'deal_amount': round(amount, 8),
+               'deal_amount_USD': USD_amount,
+               'deal_datetime': str(datetime.datetime.now(datetime.timezone(offset))).split('.')[0],
+               'profit_perc': round(profit * 100, 3),
+               f'profit_abs_{coin}': round(amount * profit, 6),
+               'profit_abs_USD': round(USD_amount * profit, 2),
+               'deal_type': order_type,
+               'total_profit': total_profit,
+               'total_balance_real': total_balance_real,
+               'cashin_cashout': cashin_cashout}
+    db.sql_add_new_order_buy(to_base)
+
+
 def start_proc_hack_TIMEX(proc_data, buffer_rates_TIMEX):
     name = f'WS_orderbook_TIMEX_{proc_data["coin"]}'
     while True:
@@ -373,3 +490,47 @@ def start_proc_hack_TIMEX(proc_data, buffer_rates_TIMEX):
                 telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
             except:
                 pass
+
+
+def coins_amounts_calc(proc_data):
+    from . import dydx
+    coin = proc_data['coin']
+    price_coin = proc_data['price_coin']
+
+    changes = proc_data['changes']
+    coins_amounts = {'DYDX': {'positions': {}}, 'TIMEX': {}}
+    balance_TIMEX = None
+    balance_DYDX = None
+    while not balance_TIMEX:
+        try:
+            balance_TIMEX = bot_TIMEX.fetchBalance()
+        except:
+            pass
+    while not balance_DYDX:
+        try:
+            balance_DYDX = dydx.get_account_data()
+        except:
+            pass
+    proc_data = dydx.pnl_diff_fetch(proc_data, balance_DYDX=balance_DYDX)
+    # TIMEX COINS UPDATE
+    coins_amounts['TIMEX'].update({price_coin: {'free': round(float(balance_TIMEX[price_coin]['free'])), 'total': round(float(balance_TIMEX[price_coin]['total']))}})
+    coins_amounts['TIMEX'].update({coin: {'free': float(balance_TIMEX[coin]['free']), 'total': float(balance_TIMEX[coin]['total'])}})
+    coins_amounts['TIMEX'].update({'TIME': {'free': float(balance_TIMEX['TIME']['free']), 'total': float(balance_TIMEX['TIME']['total'])}})
+    # DYDX COINS UPDATE
+    #BALANCE DYDX:
+    # {'account': {'starkKey': '0121fec581fb1851ccca9a412cf0df7afa99a989062bcf89f5494cf669567ebf', 'positionId': '150947',
+    # 'equity': '1678.323904', 'freeCollateral': '1676.375642', 'pendingDeposits': '0.000000', 'pendingWithdrawals': '0.000000',
+    #     'openPositions':
+    #         {'BTC-USD': {'market': 'BTC-USD', 'status': 'OPEN', 'side': 'SHORT', 'size': '-0.001', 'maxSize': '-0.001',
+    #         'entryPrice': '48749.000000', 'exitPrice': '0.000000', 'unrealizedPnl': '0.002840', 'realizedPnl': '0.000000',
+    #         'createdAt': '2021-12-22T23:25:53.199Z', 'closedAt': None, 'sumOpen': '0.001', 'sumClose': '0', 'netFunding': '0'}},
+    # 'accountNumber': '0', 'id': 'b288bad8-0216-5c44-8b30-f4699387c7dd', 'quoteBalance': '1727.030454', 'createdAt': '2021-12-01T09:29:38.279Z'}}
+    coins_amounts['DYDX'].update({'USDC': {'free': float(balance_DYDX['account']['freeCollateral']), 'total': float(balance_DYDX['account']['equity'])}})
+    if balance_DYDX['account']['openPositions'].get(proc_data['pair_DYDX']):
+        DYDX_position = float(balance_DYDX['account']['openPositions'][proc_data['pair_DYDX']]['size'])
+    else:
+        DYDX_position = 0
+    coins_amounts['DYDX']['positions'].update({proc_data['coin']: {'position': DYDX_position, 'liq_price': 0}})
+    proc_data['coins_amounts'] = coins_amounts
+    proc_data['changes'] = changes
+    return proc_data

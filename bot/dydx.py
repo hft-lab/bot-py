@@ -1,7 +1,6 @@
 from dydx3 import Client
 from dydx3.constants import API_HOST_MAINNET
 from dydx3.constants import NETWORK_ID_MAINNET
-import json
 import time
 from web3 import Web3
 from .config import config
@@ -100,3 +99,25 @@ def get_orderbook(**kwargs):
 
 def get_funding_payments(**kwargs):
     return client.private.get_funding_payments(**kwargs)
+
+
+def pnl_diff_fetch(proc_data, balance_DYDX=None):
+    pair_DYDX = proc_data['pair_DYDX']
+    if not balance_DYDX:
+        balance_DYDX = get_account_data()
+    try:
+        unrealized_position_pnl = float(balance_DYDX['account']['openPositions'][pair_DYDX]['unrealizedPnl'])
+    except:
+        return proc_data
+    realized_position_pnl = float(balance_DYDX['account']['openPositions'][pair_DYDX]['realizedPnl'])
+    DYDX_position_pnl = unrealized_position_pnl + realized_position_pnl
+    DYDX_position_side = balance_DYDX['account']['openPositions'][pair_DYDX]['side']
+    if proc_data['position_side'] and proc_data['position_side'] != DYDX_position_side:
+        proc_data['pnl_changed_diff']['cumulative_profit'] += proc_data['pnl_diff']
+        proc_data['pnl_changed_diff']['times_changed_side'] += 1
+        proc_data['position_side'] = DYDX_position_side
+    proc_data['pnl_diff'] = DYDX_position_pnl
+    if not proc_data['position_side']:
+        proc_data['position_side'] = DYDX_position_side
+        proc_data['pnl_changed_diff']['cumulative_profit'] = DYDX_position_pnl
+    return proc_data

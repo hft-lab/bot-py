@@ -1,18 +1,16 @@
-# -*- coding: utf-8 -*-
-
 from multiprocessing import Process, shared_memory
 import re
-import sys, os
-from . import db as db_t
-from . import common
-from .ftx import bot_FTX_public
+import sys
+import os
 from .timex import *
+from .common import offset, save_balance
+from .proc_data import PROC_DATA
+from .shm import fetch_shared_memory
+from .dydx import pnl_diff_fetch
+from .timex import coins_amounts_calc
 from . import dydx
+from .log import log
 
-db = db_t.DB()
-
-offset = datetime.timedelta(hours=3)
-datetime.timezone(offset)
 
 # with open('/home/ubuntu/keys_binance.txt', 'r', encoding = 'UTF-8') as db:
 #     m = db.read().split('\n')
@@ -314,42 +312,6 @@ def everyday_check(proc_data, coins_amounts, changes, start_balance, coin):
     #         pass
      
 
-async def total_balance(proc_data):
-    # try:
-    start_summ = 0
-    summ = 0
-    cashin_cashout = 0 
-    main_coin = proc_data['coin']
-    price_coin = proc_data['price_coin']
-    changes = proc_data['changes']
-    change_TIME = await fetch_change_price('TIMEUSDT')
-    changes.update({'TIME': round(change_TIME, 2)})   
-    proc_data = coins_amounts_calc(proc_data)
-    start_balance = proc_data['start_balance']
-    coins_amounts = proc_data['coins_amounts']
-    for coin, amount in start_balance['balances'].items():
-        start_summ += amount * changes[coin]
-    position_profit = start_balance['positions'][main_coin]['position'] * (changes[main_coin] - start_balance['positions'][main_coin]['price'])
-    summ += coins_amounts['DYDX']['USDC']['total']
-    summ += coins_amounts['TIMEX'][price_coin]['total'] * changes[price_coin]
-    summ += coins_amounts['TIMEX'][main_coin]['total'] * changes[main_coin]
-    total_balance_real = round(summ, 2)
-    total_profit = round(summ - start_summ - position_profit, 2)
-    # if abs(total_profit) / total_balance_real * 100 > 3:
-    #     start_balance = start_balance_rewrite(coins_amounts, changes)
-    #     cashin_cashout = total_profit
-    DYDX_USD = coins_amounts['DYDX']['USDC']['total']
-    TIMEX_USD = coins_amounts['TIMEX'][price_coin]['total'] * changes[price_coin] + coins_amounts['TIMEX'][main_coin]['total'] * changes[main_coin]
-    return total_balance_real, total_profit, DYDX_USD, TIMEX_USD, cashin_cashout
-    # except Exception as e:
-    #     exc_type, exc_obj, exc_tb = sys.exc_info()
-    #     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    #     try:
-    #         # telegram_bot.send_message(chat_id, f"#TIMEX\nBot crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-    #     except:
-    #         pass
-
-
 def check_target_profits(max_sell_DYDX, max_buy_DYDX):
     # total balance:
     # leverage = x3
@@ -465,33 +427,6 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
     #         pass
 
 
-def pnl_diff_fetch(proc_data, balance_DYDX=None):
-    pair_DYDX = proc_data['pair_DYDX']
-    if not balance_DYDX:
-        balance_DYDX = dydx.get_account_data()
-    try:
-        unrealized_position_pnl = float(balance_DYDX['account']['openPositions'][pair_DYDX]['unrealizedPnl'])
-    except:
-        return proc_data
-    realized_position_pnl = float(balance_DYDX['account']['openPositions'][pair_DYDX]['realizedPnl'])
-    DYDX_position_pnl = unrealized_position_pnl + realized_position_pnl
-    DYDX_position_side = balance_DYDX['account']['openPositions'][pair_DYDX]['side']
-    if proc_data['position_side'] and proc_data['position_side'] != DYDX_position_side:
-        proc_data['pnl_changed_diff']['cumulative_profit'] += proc_data['pnl_diff']
-        proc_data['pnl_changed_diff']['times_changed_side'] += 1
-        proc_data['position_side'] = DYDX_position_side
-    proc_data['pnl_diff'] = DYDX_position_pnl
-    if not proc_data['position_side']:
-        proc_data['position_side'] = DYDX_position_side
-        proc_data['pnl_changed_diff']['cumulative_profit'] = DYDX_position_pnl
-    return proc_data
-
-                # 'pnl_diff': None,
-                # 'position_side': None, #!!! END IT!
-                # 'pnl_changed_diff': {
-                #                 'cumulative_profit': 0,
-                #                 'times_changed_side': 0}  #DYDX SIDE
-
 
 def start_balance_rewrite(proc_data, coin, coins_amounts, changes):
     proc_data = pnl_diff_fetch(proc_data)
@@ -505,60 +440,8 @@ def start_balance_rewrite(proc_data, coin, coins_amounts, changes):
                          'position': coins_amounts['DYDX']['positions'][coin]['position'] + coins_amounts['TIMEX'][coin]['total'],
                          'price': changes[coin]}},
                      'pnl_start': pnl_diff_start}
-    with open('/home/ubuntu/balance.json', 'w') as file:
-        json.dump(start_balance, file)
+    save_balance(start_balance)
     return start_balance
-
-
-def coins_amounts_calc(proc_data):
-    # try:
-    coin = proc_data['coin']
-    price_coin = proc_data['price_coin']
-    
-    changes = proc_data['changes']
-    coins_amounts = {'DYDX': {'positions': {}}, 'TIMEX': {}}
-    balance_TIMEX = None
-    balance_DYDX = None
-    while not balance_TIMEX:
-        try:
-            balance_TIMEX = bot_TIMEX.fetchBalance()
-        except:
-            pass
-    while not balance_DYDX:
-        try:
-            balance_DYDX = dydx.get_account_data()
-        except:
-            pass
-    proc_data = pnl_diff_fetch(proc_data, balance_DYDX=balance_DYDX)
-    # TIMEX COINS UPDATE
-    coins_amounts['TIMEX'].update({price_coin: {'free': round(float(balance_TIMEX[price_coin]['free'])), 'total': round(float(balance_TIMEX[price_coin]['total']))}})
-    coins_amounts['TIMEX'].update({coin: {'free': float(balance_TIMEX[coin]['free']), 'total': float(balance_TIMEX[coin]['total'])}})
-    coins_amounts['TIMEX'].update({'TIME': {'free': float(balance_TIMEX['TIME']['free']), 'total': float(balance_TIMEX['TIME']['total'])}})
-    # DYDX COINS UPDATE
-    #BALANCE DYDX:
-    # {'account': {'starkKey': '0121fec581fb1851ccca9a412cf0df7afa99a989062bcf89f5494cf669567ebf', 'positionId': '150947', 
-    # 'equity': '1678.323904', 'freeCollateral': '1676.375642', 'pendingDeposits': '0.000000', 'pendingWithdrawals': '0.000000', 
-    #     'openPositions': 
-    #         {'BTC-USD': {'market': 'BTC-USD', 'status': 'OPEN', 'side': 'SHORT', 'size': '-0.001', 'maxSize': '-0.001', 
-    #         'entryPrice': '48749.000000', 'exitPrice': '0.000000', 'unrealizedPnl': '0.002840', 'realizedPnl': '0.000000', 
-    #         'createdAt': '2021-12-22T23:25:53.199Z', 'closedAt': None, 'sumOpen': '0.001', 'sumClose': '0', 'netFunding': '0'}}, 
-    # 'accountNumber': '0', 'id': 'b288bad8-0216-5c44-8b30-f4699387c7dd', 'quoteBalance': '1727.030454', 'createdAt': '2021-12-01T09:29:38.279Z'}}
-    coins_amounts['DYDX'].update({'USDC': {'free': float(balance_DYDX['account']['freeCollateral']), 'total': float(balance_DYDX['account']['equity'])}})
-    if balance_DYDX['account']['openPositions'].get(proc_data['pair_DYDX']):
-        DYDX_position = float(balance_DYDX['account']['openPositions'][proc_data['pair_DYDX']]['size'])
-    else:
-        DYDX_position = 0
-    coins_amounts['DYDX']['positions'].update({proc_data['coin']: {'position': DYDX_position, 'liq_price': 0}})
-    proc_data['coins_amounts'] = coins_amounts
-    proc_data['changes'] = changes
-    return proc_data
-    # except Exception as e:
-    #     exc_type, exc_obj, exc_tb = sys.exc_info()
-    #     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    #     try:
-    #         # telegram_bot.send_message(chat_id, f"#TIMEX\nBot crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-    #     except:
-    #         pass
 
 
 # def fetch_positions_TIMEX():
@@ -943,44 +826,7 @@ def check_order_status(proc_data):
     #         pass
 
 
-def fetch_shared_memory(shared, request_type=None):
-    decoded_fetched_data = None
-    while not decoded_fetched_data:
-        fetched = bytes(shared.buf)
-        fetched_str_data = str(fetched).split('}')[0].split("b'")[1] + '}'
-        try:
-            decoded_fetched_data = json.loads(fetched_str_data)
-        except Exception as e:
-            pass
-        if decoded_fetched_data:
-            if decoded_fetched_data.get('time'):
-                if time.time() - decoded_fetched_data['time'] > 0.6:
-                    # try:
-                    #     telegram_bot.send_message(chat_id, f"Old orderbook data:\nTime gap: {time.time() - decoded_fetched_data['time']}\nData: {decoded_fetched_data}")
-                    # except:
-                    #     pass
-                    if request_type == 'COUNT':
-                        return None
-                    decoded_fetched_data = None
-            # elif decoded_fetched_data.get('timestamp'):
-            #     if time.time() - (decoded_fetched_data['timestamp'] / 1000) > 0.6:
-            #         # try:
-            #         #     telegram_bot.send_message(chat_id, f"Old orderbook data:\nTime gap: {time.time() - (decoded_fetched_data['timestamp'] / 1000)}\nData: {decoded_fetched_data}")
-            #         # except:
-            #         #     pass
-            #         if request_type == 'COUNT':
-            #             return None
-            #         decoded_fetched_data = None
-    return decoded_fetched_data
 
-
-def fetch_AUD_price():
-    BTC_USD = bot_FTX_public.fetchOrderBook(symbol='BTC/USD', limit=20)
-    BTC_AUD = bot_FTX_public.fetchOrderBook(symbol='BTC/AUD', limit=20)
-    BTC_USD = (BTC_USD['asks'][0][0] + BTC_USD['bids'][0][0]) / 2
-    BTC_AUD = (BTC_AUD['asks'][0][0] + BTC_AUD['bids'][0][0]) / 2
-    change_AUDT = round(BTC_USD / BTC_AUD, 4)
-    return change_AUDT
 
 
 def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, buy_proc, report_sender=False, takers_only=False, proc_name=None):
@@ -1013,9 +859,9 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
     if takers_only:
         try:
             cancel_all_orders_TIMEX()
-        except:
-            pass
-        proc_data = check_max_amounts(proc_data, pos_balancing = True)
+        except Exception:
+            log.exception("cancel_all_orders_TIMEX")
+        proc_data = check_max_amounts(proc_data, pos_balancing=True)
     deal_made = False
     start_timestamp = time.time()
     maker_order = False
@@ -1040,12 +886,12 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                     proc_data['order_TIMEX_info'] = []
                     maker_order = False
             if deal_made:
-                proc_data = check_max_amounts(proc_data, line = 1504)
+                proc_data = check_max_amounts(proc_data, line=1504)
                 deal_made = False
             if proc_data['proc_name'] == 'taker':
                 if '03' == str(datetime.datetime.now(datetime.timezone(offset))).split('.')[0].split(':')[0].split(' ')[1] and '31' == str(datetime.datetime.now(datetime.timezone(offset))).split('.')[0].split(':')[1] and str(datetime.datetime.now(datetime.timezone(offset))).split(' ')[0].split('-')[2] != last_date_report:
                     last_date_report = str(datetime.datetime.now(datetime.timezone(offset))).split(' ')[0].split('-')[2]
-                    proc_data = check_max_amounts(proc_data, daily_report = True)
+                    proc_data = check_max_amounts(proc_data, daily_report=True)
                     doc = open(f"new_orders_{proc_data['coin']}.db", 'rb')
                     telegram.send_document(doc)
                     doc.close()
@@ -1053,9 +899,9 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
             if int(time.time() - start_timestamp) % 180 == 0:
                 try:
                     dydx.cancel_all_orders(market=proc_data['pair_DYDX'])
-                except:
-                    pass
-                proc_data = check_max_amounts(proc_data, pos_balancing = True, line = 1520)
+                except Exception:
+                    log.exception("dydx.cancel_all_orders")
+                proc_data = check_max_amounts(proc_data, pos_balancing=True, line=1520)
                 if proc_data['price_coin'] == 'AUDT':
                     change_AUDT = fetch_AUD_price()
                     proc_data['changes'].update({'AUDT': round(change_AUDT, 4)})
@@ -1249,89 +1095,6 @@ async def fetch_DYDX_ws_rates(proc_data, buffer_rates_DYDX, sh_rates_DYDX):
                 last_len = len(encoded_data)
 
 
-async def execute_order(proc_data, order_type, amount, price, side, fee_amount, fee_coin):
-    ticksize_DYDX = proc_data['ticksize_DYDX']
-    DYDX_fee = proc_data['DYDX_fee']
-    if order_type == 'MAKER':
-        TIMEX_fee = proc_data['TIMEX_fee']
-    else:
-        TIMEX_fee = proc_data['TIMEX_taker_fee']
-    TIMEX_taker_fee = proc_data['TIMEX_taker_fee']
-    pair_DYDX = proc_data['pair_DYDX']
-    coin = proc_data['coin']
-    if proc_data['price_coin'] == 'AUDT':
-        price_AUDT = price
-        change_AUDT = fetch_AUD_price()
-        price *= change_AUDT
-    sh_rates_DYDX = proc_data['sh_rates_DYDX']
-    orderbook_DYDX = fetch_shared_memory(proc_data['sh_rates_DYDX'], 'DEAL')
-    if side == 'BUY':
-        sell_dydx_price = orderbook_DYDX['bids'][0][0] + ticksize_DYDX
-        resp_create_dydx = dydx.create_order(proc_data, sell_dydx_price, amount, 'SELL', order_type='LIMIT')
-        profit = (sell_dydx_price - price) / price - (TIMEX_fee + DYDX_fee)
-    else:
-        buy_dydx_price = orderbook_DYDX['asks'][0][0] - ticksize_DYDX
-        resp_create_dydx = dydx.create_order(proc_data, buy_dydx_price, amount, 'BUY', order_type='LIMIT')
-        profit = (price - buy_dydx_price) / buy_dydx_price - (DYDX_fee + TIMEX_fee)
-
-    changes = {coin: (orderbook_DYDX['asks'][0][0] + orderbook_DYDX['bids'][0][0]) / 2, 'USDC': 1, 'USDT': 1}
-    USD_amount = amount * changes[coin]
-    if fee_coin == 'AUDT':
-        fee_amount = fee_amount * change_AUDT
-        changes.update({'AUDT': change_AUDT})
-    TG_message = f"{order_type} ORDER EXECUTED\n"
-    TG_message += f"Profit: {round(profit * 100, 3)}% ({round(USD_amount * profit, 2)} USD)\n"
-    if side == 'BUY':
-        buy_stock = 'TIMEX'
-        sell_stock = 'DYDX'
-        buy_price = price
-        sell_price = sell_dydx_price
-        TG_message += f"Buy stock: {buy_stock}\n"
-        TG_message += f"Buy price: {price}\n"
-        if proc_data['price_coin'] == 'AUDT':
-            TG_message += f"Buy price, AUDT: {price_AUDT}\n"
-        TG_message += f"Sell stock: {sell_stock}\n"
-        TG_message += f"Sell price: {sell_price}\n"
-    else:
-        buy_stock = 'DYDX'
-        sell_stock = 'TIMEX'
-        sell_price = price
-        buy_price = buy_dydx_price
-        TG_message += f"Buy stock: {buy_stock}\n"
-        TG_message += f"Buy price: {buy_price}\n"
-        TG_message += f"Sell stock: {sell_stock}\n"
-        TG_message += f"Sell price: {sell_price}\n"
-        if proc_data['price_coin'] == 'AUDT':
-            TG_message += f"Sell price, AUDT: {price_AUDT}\n"
-    TG_message += f"Deal amount:\n{amount} {coin}\n"
-    TG_message += f"({USD_amount} USD)\n"
-    TG_message += f"Fee: {fee_amount} USD\n"
-    if proc_data['price_coin'] == 'AUDT':
-        TG_message += f"Change price AUDT/USDT: {changes['AUDT']}\n"
-    try:
-        telegram.send_first_chat('<pre>' + TG_message + '</pre>', parse_mode='HTML')
-    except:
-        pass
-    proc_data['changes'] = changes
-    total_balance_real, total_profit, DYDX_USD, TIMEX_USD, cashin_cashout = await total_balance(proc_data)
-    to_base = {'TIMEX_USD': TIMEX_USD,
-            'DYDX_USD': DYDX_USD,
-            'buy_exchange': buy_stock,
-            'buy_price': buy_price,
-            'sell_exchange': sell_stock,
-            'sell_price': sell_price,
-            'deal_amount': round(amount, 8),
-            'deal_amount_USD': USD_amount,
-            'deal_datetime': str(datetime.datetime.now(datetime.timezone(offset))).split('.')[0],
-            'profit_perc': round(profit * 100, 3),
-            f'profit_abs_{coin}': round(amount * profit, 6),
-            'profit_abs_USD': round(USD_amount * profit, 2),
-            'deal_type': order_type,
-            'total_profit': total_profit,
-            'total_balance_real': total_balance_real,
-            'cashin_cashout': cashin_cashout}
-    db.sql_add_new_order_buy(to_base)
-
 
 def start_proc_hack_api_DYDX(proc_data, buffer_rates_DYDX):
     name = f'HTTP_orderbook_DYDX_{proc_data["coin"]}'
@@ -1359,16 +1122,17 @@ def start_proc_hack_ws_DYDX(proc_data, buffer_rates_DYDX, sh_rates_DYDX_ws):
         time.sleep(1)
 
 
-def start_proc_hack_trades_TIMEX(proc_data, buffer_trades_TIMEX, sh_rates_DYDX_check):
+def start_proc_hack_trades_TIMEX(proc_data, buffer_trades_TIMEX):
     name = f'trades_DYDX_{proc_data["coin"]}'
     while True:
         try:
-            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_trades(execute_order, buffer_trades_TIMEX, sh_rates_DYDX_check))
+            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_trades(proc_data, buffer_trades_TIMEX))
         except Exception as e:
+            log.exception("fetch_TIMEX_trades")
             try:
                 telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
-            except:
-                pass
+            except Exception:
+                log.exception("send_third_chat")
         time.sleep(1)
 
 
@@ -1395,25 +1159,25 @@ sh_trades_TIMEX_maker_sell = shared_memory.SharedMemory(shm_trades_TIMEX.name)
 
 
 def main():
-    common.PROC_DATA['sh_rates_DYDX'] = sh_rates_DYDX_check
+    PROC_DATA['sh_rates_DYDX'] = sh_rates_DYDX_check
     db.sql_create_table()
     procs = []
-    proc = Process(target=start_proc_hack_TIMEX, args=(common.PROC_DATA, buffer_rates_TIMEX,)) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_TIMEX, args=(PROC_DATA, buffer_rates_TIMEX,)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_api_DYDX, args=(common.PROC_DATA, buffer_rates_DYDX,)) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_api_DYDX, args=(PROC_DATA, buffer_rates_DYDX,)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_ws_DYDX, args=(common.PROC_DATA, buffer_rates_DYDX, sh_rates_DYDX_ws)) #TIMEX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_ws_DYDX, args=(PROC_DATA, buffer_rates_DYDX, sh_rates_DYDX_ws)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=start_proc_hack_trades_TIMEX, args=(common.PROC_DATA, buffer_trades_TIMEX, sh_rates_DYDX_check,)) #FTX FETCHER LAUNCH
+    proc = Process(target=start_proc_hack_trades_TIMEX, args=(PROC_DATA, buffer_trades_TIMEX)) #FTX FETCHER LAUNCH
     procs.append(proc)
 
-    proc = Process(target=find_arbitrage, args=(common.PROC_DATA, sh_rates_DYDX_maker_sell, sh_rates_TIMEX_maker_sell, sh_trades_TIMEX_maker_sell, False, False, False, 'maker_sell'))
+    proc = Process(target=find_arbitrage, args=(PROC_DATA, sh_rates_DYDX_maker_sell, sh_rates_TIMEX_maker_sell, sh_trades_TIMEX_maker_sell, False, False, False, 'maker_sell'))
     procs.append(proc) #SNX-USD SELL MAKERS PROCS LAUNCH
 
-    proc = Process(target=find_arbitrage, args=(common.PROC_DATA, sh_rates_DYDX_maker_buy, sh_rates_TIMEX_maker_buy, sh_trades_TIMEX_maker_buy, True, False, False, 'maker_buy'))
+    proc = Process(target=find_arbitrage, args=(PROC_DATA, sh_rates_DYDX_maker_buy, sh_rates_TIMEX_maker_buy, sh_trades_TIMEX_maker_buy, True, False, False, 'maker_buy'))
     procs.append(proc)  # SNX-USD BUY MAKERS PROCS LAUNCH
 
     for proc in procs:
@@ -1423,4 +1187,4 @@ def main():
     time.sleep(1)
 
     #LAUNCH MAIN PROC TAKER SNX/USDN
-    find_arbitrage(common.PROC_DATA, sh_rates_DYDX_taker, sh_rates_TIMEX_taker, None, buy_proc=True, report_sender=True, takers_only=True, proc_name='taker')
+    find_arbitrage(PROC_DATA, sh_rates_DYDX_taker, sh_rates_TIMEX_taker, None, buy_proc=True, report_sender=True, takers_only=True, proc_name='taker')
