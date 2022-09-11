@@ -329,9 +329,8 @@ def check_target_profits(max_sell_DYDX, max_buy_DYDX):
 def fetch_error_coins_calc(procData):
     try:
         procData = coins_amounts_calc(procData)
-    except:
+    except Exception:
         fetch_error_coins_calc(procData)
-        pass
     return procData
 
 
@@ -373,7 +372,7 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
         try:
             open_orders = asyncio.get_event_loop().run_until_complete(fetchOpenOrders())
             orderbook = fetch_shared_memory(sh_rates_TIMEX, 'DEAL')
-        except:
+        except Exception:
             open_orders = None
         buyOrders = 0
         sellOrders = 0
@@ -398,14 +397,6 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
             except:
                 telegram.send_emergency('<pre>' + message + '</pre>', parse_mode='HTML')
     return proc_data
-    # except Exception as e:
-    #     exc_type, exc_obj, exc_tb = sys.exc_info()
-    #     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    #     try:
-    #         telegram_bot.send_message(chat_id, f"Trace {e}. Error on line {exc_tb.tb_lineno}")
-    #     except:
-    #         pass
-
 
 
 def start_balance_rewrite(proc_data, coin, coins_amounts, changes):
@@ -422,16 +413,6 @@ def start_balance_rewrite(proc_data, coin, coins_amounts, changes):
                      'pnl_start': pnl_diff_start}
     save_balance(start_balance)
     return start_balance
-
-
-# def fetch_positions_TIMEX():
-#     positions_TIMEX = None
-#     while not positions_TIMEX:
-#         try:
-#             positions_TIMEX = bot_TIMEX.fetchPositions()
-#             return positions_TIMEX
-#         except:
-#             continue    
 
 
 def balancing_TIMEX(proc_data):
@@ -746,13 +727,14 @@ def makers_count(proc_data, orderbook_TIMEX, orderbook_DYDX, excluded_price=None
                         return profit_deal
         return None
     except Exception as e:
+        log.exception("makers_count exception")
         exc_type, exc_obj, exc_tb = sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         i = 0
         try:
             telegram.send_first_chat(f"Bot {proc_data['proc_name']} crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-        except:
-            pass
+        except Exception:
+            log.exception("failed to send telegram: makers count")
 
 
 def check_order_status(proc_data):
@@ -796,25 +778,9 @@ def check_order_status(proc_data):
             if not maker_deal['sell_price'] - 2 * ticksize_TIMEX <= order_price <= maker_deal['sell_price'] + 2 * ticksize_TIMEX:
                 response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(order_TIMEX_info[0]))
                 return
-    # except Exception as e:
-    #     exc_type, exc_obj, exc_tb = sys.exc_info()
-    #     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    #     i = 0
-    #     try:
-    #         telegram_bot.send_message(chat_id, f"Bot {procData['proc_name']} crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-    #     except:
-    #         pass
-
-
-
 
 
 def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, buy_proc, report_sender=False, takers_only=False, proc_name=None):
-    # def write_to_log(text):
-    #     with open(f"{proc_name}.txt", "a") as myfile:
-    #         myfile.write(text + '\n\n')  
-    # write_to_log(f"Started process {datetime.datetime.now()}\n\n")
-    # rewrite_last_pnl()
     proc_data['sh_rates_DYDX'] = sh_rates_DYDX
     proc_data['sh_rates_TIMEX'] = sh_rates_TIMEX
     proc_data['sh_trades_TIMEX'] = sh_trades_TIMEX
@@ -950,8 +916,8 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                     if response_cancel['responseBody'].get('changedOrders'):
                         if response_cancel['responseBody']['changedOrders'][0]['filledQuantity'] != '0':
                            deal_made = True 
-                except:
-                    pass
+                except Exception:
+                    log.exception("cancel_ws_order buy")
                 
             else:
                 order_data = {'price': best_deal['sell_price'], 'amount': best_deal['amount'], 'side': 'SELL', 'pair': proc_data['pair_TIMEX']}
@@ -963,8 +929,8 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                     if response_cancel['responseBody'].get('changedOrders'):
                         if response_cancel['responseBody']['changedOrders'][0]['filledQuantity'] != '0':
                            deal_made = True 
-                except:
-                    pass
+                except Exception:
+                    log.exception("cancel_ws_order buy")
             last_taker_deal = best_deal
             message = f"Taker deal found:\n"
             message += f"Buy/Sell: {best_deal['deal_buy']}/{best_deal['deal_sell']}\n"
@@ -978,21 +944,19 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
             try:
                 telegram.send_first_chat(message)
             except:
+                log.exception("failed to send telegram taker_deal_found")
                 telegram.send_emergency(message)
-                pass
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            i = 0
             try:
                 cancel_all_orders_TIMEX()
-            except:
-                pass
+            except Exception:
+                log.exception("failed to cancel all timex orders")
             try:
                 telegram.send_first_chat(f"#TIMEX\nBot {proc_data['pair_DYDX']} crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-            except:
+            except Exception:
+                log.exception("failed to send telegram")
                 telegram.send_emergency(f"#TIMEX\nBot {proc_data['pair_DYDX']} crushed. Trace {e}. Error on line {exc_tb.tb_lineno}")
-                pass
 
 
 def fetch_DYDX_api_rates(proc_data, buffer_rates_DYDX):
@@ -1075,28 +1039,30 @@ async def fetch_DYDX_ws_rates(proc_data, buffer_rates_DYDX, sh_rates_DYDX):
 
 
 def start_proc_hack_api_DYDX(proc_data, buffer_rates_DYDX):
-    name = f'HTTP_orderbook_DYDX_{proc_data["coin"]}'
     while True:
         try:
             fetch_DYDX_api_rates(proc_data, buffer_rates_DYDX)
         except Exception as e:
+            log.exception("fetch_DYDX_api_rates")
             try:
+                name = f'HTTP_orderbook_DYDX_{proc_data["coin"]}'
                 telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
-            except:
-                pass
+            except Exception:
+                log.exception("failed to send telegram")
         time.sleep(1)
 
 
 def start_proc_hack_ws_DYDX(proc_data, buffer_rates_DYDX, sh_rates_DYDX_ws):
-    name = f'WS_orderbook_DYDX_{proc_data["coin"]}'
     while True:
         try:
             asyncio.get_event_loop().run_until_complete(fetch_DYDX_ws_rates(proc_data, buffer_rates_DYDX, sh_rates_DYDX_ws))
         except Exception as e:
+            log.exception("fetch_DYDX_ws_rates")
             try:
+                name = f'WS_orderbook_DYDX_{proc_data["coin"]}'
                 telegram.send_third_chat(f"Process: {name}\nTrace:\n {e}")
-            except:
-                pass
+            except Exception:
+                log.exception("failed to send telegram")
         time.sleep(1)
 
 
