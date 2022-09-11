@@ -2,9 +2,11 @@ INSTALL
 =======
 
 ```shell
+git clone git@github.com:hft-lab/websockets.git
 git clone git@github.com:hft-lab/dydx-v3-python.git
 git clone git@github.com:hft-lab/bot-py.git
 python3 -m virtualenv venv
+./venv/bin/pip install -e websockets
 ./venv/bin/pip install -e dydx-v3-python
 ./venv/bin/pip install -e bot-py
 ```

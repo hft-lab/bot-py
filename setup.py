@@ -8,8 +8,8 @@ setup(
     install_requires=[
         'ccxt==1.92.30',
         'pyTelegramBotAPI==4.7.0',
-        'websockets==9.1',
-        'web3',
+        #'websockets==9.1',
+        #'web3',
         #'dydx-v3-python',  # has conflicting version of setuptools with ccxt
     ],
     entry_points={
