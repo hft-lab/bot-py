@@ -218,23 +218,29 @@ def everyday_check(proc_data, coins_amounts, changes, start_balance, coin):
     message += '---------------------------\n' 
     message += f"Negative deals statistic:\nTotal loss deals: {loss_deals}\nTotal deals: {total_deals}\n"
     message += f"Max loss, USD: {max_deal}\n"
-    try:
-        message += f"Av. loss, %: {round(sum(deals_theor_loss) / len(deals_theor_loss), 4)}\n"
-    except:
-        message += f"Av. loss, %: 0\n"
+    if len(deals_theor_loss) > 0:
+        av_loss = round(sum(deals_theor_loss) / len(deals_theor_loss), 4)
+    else:
+        av_loss = 0
+    message += f"Av. loss, %: {av_loss}\n"
     message += f"Max loss, %: {round(max_deal_theor, 2)}\n"
-    try:
-        message += f"Loss/profit deals, %: {round(loss_deals / total_deals * 100, 2)}\n"
-        message += f"Loss/profit cashflow, %: {round(loss_deals_cashflow / total_cashflow * 100, 2) }\n"
-    except:
-        message += f"Loss/profit deals, %: 0\n"
-        message += f"Loss/profit cashflow, %: 0\n"        
+    if total_deals > 0:
+        lp_deals = round(loss_deals / total_deals * 100, 2)
+    else:
+        lp_deals = 0
+    if total_cashflow > 0:
+        lp_cashflow = round(loss_deals_cashflow / total_cashflow * 100, 2)
+    else:
+        lp_cashflow = 0
+    message += f"Loss/profit deals, %: {lp_deals}\n"
+    message += f"Loss/profit cashflow, %: {lp_cashflow}\n"
     message += f"Total cashflow, USD: {round(total_cashflow, 2)}\n"
     message += f"Loss deals cashflow, USD: {round(loss_deals_cashflow, 2)}\n"
-    try:
-        message += f"Av. loss deal amount, USD: {round(loss_deals_cashflow / loss_deals)}\n"
-    except:
-        message += f"Av. loss deal amount, USD: 0\n"
+    if loss_deals > 0:
+        av_loss_deal_amount = round(loss_deals_cashflow / loss_deals)
+    else:
+        av_loss_deal_amount = 0
+    message += f"Av. loss deal amount, USD: {av_loss_deal_amount}\n"
     message += f"Total loss, USD: {round(sum(deals_loss), 2)}\n"
     message += f"Total theor profit, USD: {round(total_theor_profit, 2)}\n"
     dis_sum = 0
@@ -256,12 +262,9 @@ def everyday_check(proc_data, coins_amounts, changes, start_balance, coin):
     message += f"PNL profit, USD: {proc_data['pnl_changed_diff']['cumulative_profit'] - start_balance['pnl_start']}"
     try:
         telegram.send_second_chat('<pre>' + message + '</pre>', parse_mode='HTML')
-    except:
-        try:
-            time.sleep(1)
-            telegram.send_second_chat('<pre>' + message + '</pre>', parse_mode='HTML')
-        except:
-            pass
+    except Exception:
+        log.exception("failed to send telegram")
+
     to_base = {'TIMEX_USD': 0,
                 'DYDX_USD': 0,
                 'buy_exchange': 'Daily report',
