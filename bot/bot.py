@@ -1,5 +1,4 @@
 from multiprocessing import Process, shared_memory
-import re
 import sys
 import os
 from .timex import *
@@ -10,28 +9,6 @@ from .dydx import pnl_diff_fetch
 from .timex import coins_amounts_calc
 from . import dydx
 from .log import log
-
-
-# with open('/home/ubuntu/keys_binance.txt', 'r', encoding = 'UTF-8') as db:
-#     m = db.read().split('\n')
-# api_key = m[0].split("'")[1]
-# api_secret = m[1].split("'")[1]
-
-# bot_binance_pro = ccxtpro.binanceusdm({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True})
-
-
-def return_string_price(price):
-    if 'e' in str(price):
-        price = str(price)
-        try:
-            parts = re.search(r'\.(\d+)e.(\d+)', price)
-        except Exception as e:
-            return float(price)
-        res = len(parts.group(1))
-        exp = int(parts.group(2)) + res
-        return "{:.{exp}f}".format(float(price), exp=exp)
-    else:
-        return price
 
 
 def create_balance_message(proc_data):
@@ -1046,9 +1023,7 @@ async def fetch_DYDX_ws_rates(proc_data, buffer_rates_DYDX, sh_rates_DYDX):
             res_OB = await websocket.recv()
             res_OB = json.loads(res_OB)
             orderbook = fetch_shared_memory(sh_rates_DYDX, 'DEAL')
-            try:
-                res_OB['contents']
-            except:
+            if "contents" not in res_OB:
                 continue
             if res_OB['type'] == 'subscribed':
                 orderbook = {'asks': [[float(ask['price']), float(ask['size'])] for ask in res_OB['contents']['asks'] if float(ask['size']) > 0],
