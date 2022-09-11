@@ -8,6 +8,7 @@ import string
 import random
 
 from . import shm
+from .log import log
 from .db import db
 from .telegram import telegram
 from .config import config
@@ -164,10 +165,14 @@ def fetch_open_orders():
     return msg
 
 
-def cancel_all_orders_TIMEX():
+def cancel_all_orders_timex():
     response_fetch = bot_TIMEX.fetchOpenOrders()
+    if not response_fetch:
+        return
     ids = [x['id'] for x in response_fetch]
+    log.info("cancelling orders: %s", ids)
     response_cancel = bot_TIMEX.cancelOrders(ids)
+    log.info("cancel orders response: %s", response_cancel)
 # def rewrite_last_pnl():
 #     TIMEX_pnl = None
 #     while not TIMEX_pnl:

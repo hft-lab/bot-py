@@ -804,7 +804,7 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
     min_amount = proc_data['min_amount']
     if takers_only:
         try:
-            cancel_all_orders_TIMEX()
+            cancel_all_orders_timex()
         except Exception:
             log.exception("cancel_all_orders_TIMEX")
         proc_data = check_max_amounts(proc_data, pos_balancing=True)
@@ -847,6 +847,7 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                     dydx.cancel_all_orders(market=proc_data['pair_DYDX'])
                 except Exception:
                     log.exception("dydx.cancel_all_orders")
+                    time.sleep(1)
                 proc_data = check_max_amounts(proc_data, pos_balancing=True, line=1520)
                 if proc_data['price_coin'] == 'AUDT':
                     change_AUDT = fetch_AUD_price()
@@ -949,7 +950,7 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             try:
-                cancel_all_orders_TIMEX()
+                cancel_all_orders_timex()
             except Exception:
                 log.exception("failed to cancel all timex orders")
             try:
