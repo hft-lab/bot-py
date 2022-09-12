@@ -1,13 +1,19 @@
 from multiprocessing import Process, shared_memory
 import sys
 import os
-from .timex import *
+import time
+import datetime
+import asyncio
+import json
+import websockets
+
+from . import timex
+from . import dydx
+from .db import db
+from .telegram import telegram
 from .common import offset, save_balance
 from .proc_data import PROC_DATA
 from .shm import fetch_shared_memory
-from .dydx import pnl_diff_fetch
-from .timex import coins_amounts_calc
-from . import dydx
 from .log import log
 
 
@@ -328,7 +334,7 @@ def check_target_profits(max_sell_DYDX, max_buy_DYDX):
 
 def fetch_error_coins_calc(procData):
     try:
-        procData = coins_amounts_calc(procData)
+        procData = timex.coins_amounts_calc(procData)
     except Exception:
         fetch_error_coins_calc(procData)
     return procData
@@ -370,7 +376,7 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
         if line:
             message += f"\nLine: {line}"
         try:
-            open_orders = asyncio.get_event_loop().run_until_complete(fetchOpenOrders())
+            open_orders = asyncio.get_event_loop().run_until_complete(timex.fetchOpenOrders())
             orderbook = fetch_shared_memory(sh_rates_TIMEX, 'DEAL')
         except Exception:
             open_orders = None
@@ -386,7 +392,7 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
                     message += f"\nSell.P: {order['price']} BA: {orderbook['asks'][0][0]}"
         if sellOrders > 1 or buyOrders > 1:
             for order in open_orders['responseBody']['orders']:
-                asyncio.get_event_loop().run_until_complete(cancel_ws_order(order['id'])) 
+                asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(order['id']))
         if daily_report:
             everyday_check(proc_data, coins_amounts, changes, start_balance, coin)
             time.sleep(5)
@@ -400,7 +406,7 @@ def check_max_amounts(proc_data, daily_report=False, pos_balancing=False, line=0
 
 
 def start_balance_rewrite(proc_data, coin, coins_amounts, changes):
-    proc_data = pnl_diff_fetch(proc_data)
+    proc_data = dydx.pnl_diff_fetch(proc_data)
     price_coin = proc_data['price_coin']
     pnl_diff_start = proc_data['pnl_diff']
     start_balance = {'balances': {'USDC': coins_amounts['DYDX']['USDC']['total'],
@@ -760,7 +766,7 @@ def check_order_status(proc_data):
         last_trade = fetch_shared_memory(sh_trades_TIMEX)
         if last_trade != start_trade:
             if last_trade['makerOrderId'] == order_TIMEX_info[0] or last_trade['takerOrderId'] == order_TIMEX_info[0]:
-                response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(order_TIMEX_info[0]))
+                response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(order_TIMEX_info[0]))
                 return
         orderbook_TIMEX = fetch_shared_memory(sh_rates_TIMEX, 'COUNT')
         orderbook_DYDX = fetch_shared_memory(sh_rates_DYDX, 'COUNT')
@@ -768,15 +774,15 @@ def check_order_status(proc_data):
             continue   
         maker_deal = makers_count(proc_data, orderbook_TIMEX, orderbook_DYDX, order_price)
         if not maker_deal:
-            response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(order_TIMEX_info[0]))
+            response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(order_TIMEX_info[0]))
             return
         if order_TIMEX_info[1]['deal_buy'] == 'TIMEX':
             if not maker_deal['buy_price'] - 2 * ticksize_TIMEX <= order_price <= maker_deal['buy_price'] + 2 * ticksize_TIMEX:
-                response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(order_TIMEX_info[0]))
+                response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(order_TIMEX_info[0]))
                 return
         else:
             if not maker_deal['sell_price'] - 2 * ticksize_TIMEX <= order_price <= maker_deal['sell_price'] + 2 * ticksize_TIMEX:
-                response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(order_TIMEX_info[0]))
+                response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(order_TIMEX_info[0]))
                 return
 
 
@@ -796,15 +802,15 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
     proc_data['max_amount'] = round(2000 / orderbook_DYDX['bids'][0][0], 6)
     proc_data['buy_proc'] = buy_proc
     if proc_data['price_coin'] == 'AUDT':
-        change_AUDT = fetch_AUD_price()
+        change_AUDT = timex.fetch_AUD_price()
         proc_data['changes'].update({'AUDT': round(change_AUDT, 4)})
-    change_TIME = asyncio.get_event_loop().run_until_complete(fetch_change_price('TIMEUSDT'))
+    change_TIME = asyncio.get_event_loop().run_until_complete(timex.fetch_change_price('TIMEUSDT'))
     proc_data['changes'].update({'TIME': round(change_TIME, 2)})
     ticksize_TIMEX = proc_data['ticksize_TIMEX']
     min_amount = proc_data['min_amount']
     if takers_only:
         try:
-            cancel_all_orders_timex()
+            timex.cancel_all_orders_timex()
         except Exception:
             log.exception("cancel_all_orders_TIMEX")
         proc_data = check_max_amounts(proc_data, pos_balancing=True)
@@ -819,12 +825,12 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
             if maker_order:
                 if maker_counter == 5:
                     if proc_data['price_coin'] == 'AUDT':
-                        change_AUDT = fetch_AUD_price()
+                        change_AUDT = timex.fetch_AUD_price()
                         proc_data['changes'].update({'AUDT': round(change_AUDT, 4)})
                     maker_counter = 0
                 maker_counter += 1
                 time_start = time.time()
-                order = asyncio.get_event_loop().run_until_complete(fetch_ws_order(proc_data['order_TIMEX_info'][0]))
+                order = asyncio.get_event_loop().run_until_complete(timex.fetch_ws_order(proc_data['order_TIMEX_info'][0]))
                 if order:
                     filled_amount = float(order['filledQuantity'])
                     if filled_amount > min_amount:
@@ -847,12 +853,11 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                     dydx.cancel_all_orders(market=proc_data['pair_DYDX'])
                 except Exception:
                     log.exception("dydx.cancel_all_orders")
-                    time.sleep(1)
                 proc_data = check_max_amounts(proc_data, pos_balancing=True, line=1520)
                 if proc_data['price_coin'] == 'AUDT':
-                    change_AUDT = fetch_AUD_price()
+                    change_AUDT = timex.fetch_AUD_price()
                     proc_data['changes'].update({'AUDT': round(change_AUDT, 4)})
-                change_TIME = asyncio.get_event_loop().run_until_complete(fetch_change_price('TIMEUSDT'))
+                change_TIME = asyncio.get_event_loop().run_until_complete(timex.fetch_change_price('TIMEUSDT'))
                 proc_data['changes'].update({'TIME': round(change_TIME, 2)})
             start_time = time.time()
             orderbook_TIMEX = fetch_shared_memory(sh_rates_TIMEX, 'COUNT')
@@ -886,10 +891,10 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                 
                 if maker_deal['deal_sell'] == 'TIMEX':
                     order_data = {'price': maker_deal['sell_price'], 'amount': maker_deal['amount'], 'side': 'SELL', 'pair': proc_data['pair_TIMEX']}
-                    resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(create_ws_order(order_data))
+                    resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(timex.create_ws_order(order_data))
                 elif maker_deal['deal_buy'] == 'TIMEX':
                     order_data = {'price': maker_deal['buy_price'], 'amount': maker_deal['amount'], 'side': 'BUY', 'pair': proc_data['pair_TIMEX']}
-                    resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(create_ws_order(order_data))
+                    resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(timex.create_ws_order(order_data))
                 try:
                     if not resp_create_TIMEX_order:
                         proc_data = check_max_amounts(proc_data)
@@ -909,9 +914,9 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                         continue
             if best_deal['deal_buy'] == 'TIMEX':
                 order_data = {'price': best_deal['buy_price'], 'amount': best_deal['amount'], 'side': 'BUY', 'pair': proc_data['pair_TIMEX']}
-                resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(create_ws_order(order_data))
+                resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(timex.create_ws_order(order_data))
                 try:
-                    response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(resp_create_TIMEX_order['responseBody']['orders'][0]['id']))
+                    response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(resp_create_TIMEX_order['responseBody']['orders'][0]['id']))
                     if response_cancel['responseBody'].get('unchangedOrders'):
                         deal_made = True
                     if response_cancel['responseBody'].get('changedOrders'):
@@ -922,9 +927,9 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
                 
             else:
                 order_data = {'price': best_deal['sell_price'], 'amount': best_deal['amount'], 'side': 'SELL', 'pair': proc_data['pair_TIMEX']}
-                resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(create_ws_order(order_data))
+                resp_create_TIMEX_order = asyncio.get_event_loop().run_until_complete(timex.create_ws_order(order_data))
                 try:
-                    response_cancel = asyncio.get_event_loop().run_until_complete(cancel_ws_order(resp_create_TIMEX_order['responseBody']['orders'][0]['id']))
+                    response_cancel = asyncio.get_event_loop().run_until_complete(timex.cancel_ws_order(resp_create_TIMEX_order['responseBody']['orders'][0]['id']))
                     if response_cancel['responseBody'].get('unchangedOrders'):
                         deal_made = True
                     if response_cancel['responseBody'].get('changedOrders'):
@@ -950,7 +955,7 @@ def find_arbitrage(proc_data, sh_rates_DYDX, sh_rates_TIMEX, sh_trades_TIMEX, bu
         except Exception as e:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             try:
-                cancel_all_orders_timex()
+                timex.cancel_all_orders_timex()
             except Exception:
                 log.exception("failed to cancel all timex orders")
             try:
@@ -985,7 +990,7 @@ async def fetch_DYDX_ws_rates(proc_data, buffer_rates_DYDX, sh_rates_DYDX):
         'includeOffsets': True,
     }
     last_len = 15000
-    async with websockets.connect(URI_WS) as websocket:
+    async with websockets.connect(timex.URI_WS) as websocket:
         await websocket.send(json.dumps(req_orderbook))       
         while True:
             res_OB = await websocket.recv()
@@ -1071,7 +1076,7 @@ def start_proc_hack_trades_TIMEX(proc_data, buffer_trades_TIMEX):
     name = f'trades_DYDX_{proc_data["coin"]}'
     while True:
         try:
-            asyncio.get_event_loop().run_until_complete(fetch_TIMEX_trades(proc_data, buffer_trades_TIMEX))
+            asyncio.get_event_loop().run_until_complete(timex.fetch_TIMEX_trades(proc_data, buffer_trades_TIMEX))
         except Exception as e:
             log.exception("fetch_TIMEX_trades")
             try:
@@ -1107,7 +1112,7 @@ def main():
     PROC_DATA['sh_rates_DYDX'] = sh_rates_DYDX_check
     db.sql_create_table()
     procs = []
-    proc = Process(target=start_proc_hack_TIMEX, args=(PROC_DATA, buffer_rates_TIMEX,)) #TIMEX FETCHER LAUNCH
+    proc = Process(target=timex.start_proc_hack_TIMEX, args=(PROC_DATA, buffer_rates_TIMEX,)) #TIMEX FETCHER LAUNCH
     procs.append(proc)
 
     proc = Process(target=start_proc_hack_api_DYDX, args=(PROC_DATA, buffer_rates_DYDX,)) #TIMEX FETCHER LAUNCH
